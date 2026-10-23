@@ -1,5 +1,3 @@
-# scripts/auto_incremental_train_v2.py
-
 import requests
 import pickle
 import torch
@@ -11,18 +9,12 @@ from sklearn.feature_extraction.text import CountVectorizer
 from backend.model import PictogramMLP
 import os
 
-# ----------------------------
-# Configuración
-# ----------------------------
-BACKEND_URL = "http://localhost:4000/api/sentences/all"
+BACKEND_URL = os.environ["CAA_INCREMENTAL_TRAIN_URL"]
 ARTIFACTS_PATH = "artifacts/"
 SPEAKER_ID_DEFAULT = "all"
 
 os.makedirs(ARTIFACTS_PATH, exist_ok=True)
 
-# ----------------------------
-# 1️⃣ Cargar artefactos existentes
-# ----------------------------
 try:
     with open(f"{ARTIFACTS_PATH}vectorizer.pkl", "rb") as f:
         vectorizer = pickle.load(f)
@@ -47,16 +39,9 @@ try:
 except:
     global_library = set()
 
-# ----------------------------
-# 2️⃣ Obtener frases nuevas del backend
-# ----------------------------
-try:
-    resp = requests.get(BACKEND_URL)
-    resp.raise_for_status()
-    data = resp.json()
-except Exception as e:
-    print("Error al obtener datos del backend:", e)
-    data = []
+resp = requests.get(BACKEND_URL, timeout=30)
+resp.raise_for_status()
+data = resp.json()
 
 if not data:
     print("No hay datos nuevos para entrenar. Fin del script.")
@@ -78,9 +63,6 @@ if not new_texts:
     print("No hay frases nuevas para entrenar. Fin del script.")
     exit()
 
-# ----------------------------
-# 3️⃣ Actualizar vectorizer
-# ----------------------------
 new_words = list(set(chain.from_iterable([text.split() for text in new_texts])))
 if vectorizer:
     all_words = list(vectorizer.vocabulary_.keys()) + [w for w in new_words if w not in vectorizer.vocabulary_]
@@ -90,9 +72,6 @@ else:
 vectorizer = CountVectorizer(vocabulary=all_words)
 X = vectorizer.fit_transform(new_texts).toarray()
 
-# ----------------------------
-# 4️⃣ Actualizar LabelEncoder
-# ----------------------------
 all_labels = list(set(chain.from_iterable(new_pictos)))
 if label_encoder:
     all_labels = list(label_encoder.classes_) + [l for l in all_labels if l not in label_encoder.classes_]
@@ -100,9 +79,6 @@ if label_encoder:
 label_encoder = LabelEncoder()
 label_encoder.fit(all_labels)
 
-# ----------------------------
-# 5️⃣ Transformar pictogram_ids a multi-hot
-# ----------------------------
 y_tensor = torch.zeros((len(new_texts), len(label_encoder.classes_)), dtype=torch.float32)
 for i, pictos in enumerate(new_pictos):
     indices = label_encoder.transform(pictos)
@@ -111,17 +87,12 @@ for i, pictos in enumerate(new_pictos):
 
 X_tensor = torch.tensor(X, dtype=torch.float32)
 
-# ----------------------------
-# 6️⃣ Cargar modelo existente y expandir salida si hay pictogramas nuevos
-# ----------------------------
 input_dim = X.shape[1]
 output_dim = len(label_encoder.classes_)
 
 old_model = None
 if os.path.exists(f"{ARTIFACTS_PATH}best_model.pth") and vectorizer and label_encoder:
     try:
-        # Cargamos el modelo antiguo solo para copiar pesos parciales
-        # Nota: input_dim y output_dim deben ajustarse al tamaño antiguo si hay mismatch
         old_model = PictogramMLP(input_dim=input_dim, output_dim=output_dim)
         old_model.load_state_dict(torch.load(f"{ARTIFACTS_PATH}best_model.pth", map_location="cpu"))
         old_model.eval()
@@ -130,29 +101,19 @@ if os.path.exists(f"{ARTIFACTS_PATH}best_model.pth") and vectorizer and label_en
 
 model = PictogramMLP(input_dim=input_dim, output_dim=output_dim)
 
-# ----------------------------
-# 7️⃣ Copiar pesos antiguos parciales si existen
-# ----------------------------
 if old_model:
     with torch.no_grad():
-        # fc1: copiar solo columnas antiguas
         old_in_features = old_model.fc1.in_features
-        old_out_features_fc1 = old_model.fc1.out_features
         model.fc1.weight[:, :old_in_features] = old_model.fc1.weight
         model.fc1.bias = old_model.fc1.bias
 
-        # bn1
         model.bn1.weight = old_model.bn1.weight
         model.bn1.bias = old_model.bn1.bias
 
-        # fc2: copiar solo filas antiguas
         old_out_features_fc2 = old_model.fc2.out_features
         model.fc2.weight[:old_out_features_fc2, :] = old_model.fc2.weight
         model.fc2.bias[:old_out_features_fc2] = old_model.fc2.bias
 
-# ----------------------------
-# 8️⃣ Entrenamiento incremental rápido
-# ----------------------------
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
 num_epochs = 20
@@ -167,9 +128,6 @@ for epoch in range(num_epochs):
     if (epoch + 1) % 5 == 0:
         print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item():.4f}")
 
-# ----------------------------
-# 9️⃣ Actualizar bibliotecas y guardar artefactos
-# ----------------------------
 global_library.update(all_labels)
 for speaker, pictos in zip(new_speakers, new_pictos):
     if speaker in personal_libraries:
@@ -187,4 +145,4 @@ with open(f"{ARTIFACTS_PATH}personal_libraries.pkl", "wb") as f:
 with open(f"{ARTIFACTS_PATH}global_library.pkl", "wb") as f:
     pickle.dump(global_library, f)
 
-print("✅ Entrenamiento incremental continuo completado con nuevas frases.")
+print("Entrenamiento incremental continuo completado con nuevas frases.")

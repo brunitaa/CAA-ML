@@ -2,7 +2,7 @@
 
 Prototipo de aprendizaje automático para predecir pictogramas de comunicación aumentativa y alternativa (CAA) a partir de una frase y del identificador de una persona usuaria. El proyecto incluye una API HTTP con FastAPI, un modelo PyTorch y scripts de entrenamiento.
 
-> **Estado del proyecto:** el código de entrenamiento de ejemplo contiene solo dos frases ficticias y no hay un dataset de producción ni un archivo de dependencias. Los artefactos incluidos permiten probar el flujo con el entorno y los datos con los que fueron generados, pero no deben considerarse un modelo validado para uso clínico o de producción.
+> **Datos y estado del proyecto:** el dataset de ejemplo está incluido directamente en `train/train_model.py` como una lista de 153 registros; no se almacena en un archivo independiente. Los scripts automáticos también pueden obtener datos de un backend externo. Los artefactos incluidos no deben considerarse un modelo validado para uso clínico o de producción.
 
 ## Cómo funciona
 
@@ -18,10 +18,10 @@ El modelo está definido en [`backend/model.py`](backend/model.py). La carga del
 - PyTorch, scikit-learn, FastAPI y Uvicorn.
 - Para los scripts que consultan otro servicio: `requests`.
 
-No se incluye `requirements.txt` ni otra configuración de dependencias. En un entorno virtual, instala las dependencias necesarias:
+Instala las dependencias desde la raíz del repositorio:
 
 ```bash
-python -m pip install torch scikit-learn fastapi uvicorn requests
+python -m pip install -r requirements.txt
 ```
 
 La instalación de PyTorch puede variar según el sistema operativo y si se desea usar GPU; consulta las instrucciones de instalación de PyTorch para elegir la variante adecuada.
@@ -83,9 +83,9 @@ El punto de entrada es [`train/train_model.py`](train/train_model.py):
 python -m train.train_model
 ```
 
-El script construye el vectorizador, el codificador de etiquetas y las bibliotecas personal/global a partir de una lista `dataset` definida en el propio archivo, y guarda los artefactos en `artifacts/`. Sustituye los ejemplos por datos representativos antes de entrenar. El directorio `artifacts/` debe existir.
+El script construye el vectorizador, el codificador de etiquetas y las bibliotecas personal/global a partir de una lista `dataset` definida en el propio archivo, y guarda los artefactos en `artifacts/`. Puedes reemplazar o ampliar esa lista con tu dataset. El directorio `artifacts/` debe existir.
 
-El dataset de ejemplo tiene solo dos filas; con la división 90/10 actual queda una sola fila de entrenamiento, que no es suficiente para la capa `BatchNorm1d`. Por tanto, el ejemplo no debe considerarse ejecutable o entrenado de forma útil sin ampliar y validar el dataset.
+El dataset de ejemplo está definido directamente en el archivo de entrenamiento. Revisa su tamaño y distribución antes de entrenar; el script reserva el 10 % de los datos para validación y usa una capa `BatchNorm1d`, por lo que se requiere un conjunto de entrenamiento con suficientes ejemplos.
 
 Cada elemento del dataset tiene esta forma:
 
@@ -102,9 +102,18 @@ Cada elemento del dataset tiene esta forma:
 ### Scripts adicionales
 
 - [`scripts/train_incremental.py`](scripts/train_incremental.py): ejemplo de entrenamiento incremental con datos editados directamente en el script.
-- [`scripts/auto_incremental_train.py`](scripts/auto_incremental_train.py): intenta obtener frases de `http://localhost:4000/api/sentences/all` y actualizar los artefactos.
-- [`scripts/auto_train.py`](scripts/auto_train.py): ejemplo de reentrenamiento desde el servicio externo configurado en `http://localhost:4000/api/sentences/model`.
-- [`scripts/update_artifacts.py`](scripts/update_artifacts.py): archivo auxiliar actualmente vacío.
+- [`scripts/auto_incremental_train.py`](scripts/auto_incremental_train.py): obtiene frases de una URL configurada mediante la variable `CAA_INCREMENTAL_TRAIN_URL` y actualiza los artefactos. La respuesta debe ser una lista de registros con `input_text`, `pictogram_ids` y, opcionalmente, `speaker_id`.
+- [`scripts/auto_train.py`](scripts/auto_train.py): obtiene pictogramas de la URL configurada mediante `CAA_AUTO_TRAIN_URL`. Esa URL debe apuntar al endpoint que devuelve un objeto con las listas `global` y `personal`; cada elemento debe incluir `example_text` e `id`.
+
+Configura las variables de entorno con las direcciones de tu servicio antes de ejecutar estos scripts. No se incluyen direcciones de backend en el código. En PowerShell, por ejemplo:
+
+```powershell
+$env:CAA_AUTO_TRAIN_URL = "https://tu-servidor/endpoint"
+python -m scripts.auto_train
+
+$env:CAA_INCREMENTAL_TRAIN_URL = "https://tu-servidor/endpoint"
+python -m scripts.auto_incremental_train
+```
 
 Los scripts incrementales y automáticos son prototipos y no forman un flujo de entrenamiento de producción. En particular, los automáticos requieren que exista y responda el servicio externo con el formato esperado por el código. Revisa y valida los datos, las dimensiones del modelo y los artefactos resultantes antes de utilizarlos con la API.
 
@@ -120,6 +129,7 @@ Los scripts incrementales y automáticos son prototipos y no forman un flujo de 
 ├── scripts/                   # Ejemplos de entrenamiento y actualización
 ├── train/
 │   └── train_model.py         # Entrenamiento inicial de ejemplo
+├── requirements.txt           # Dependencias de Python
 └── README.md
 ```
 
@@ -127,6 +137,6 @@ Los scripts incrementales y automáticos son prototipos y no forman un flujo de 
 
 - El cargador usa rutas relativas a la raíz del repositorio; inicia el servidor desde esa ubicación.
 - Los archivos `.pkl` se cargan con `pickle`. Carga únicamente artefactos de una fuente confiable: deserializar archivos pickle no confiables puede ejecutar código.
-- El conjunto de datos de ejemplo es demasiado pequeño para evaluar la calidad o generalización del modelo. Evalúa el modelo con datos representativos antes de cualquier uso real.
+- El dataset incluido es de ejemplo y no demuestra la calidad ni la generalización del modelo. Evalúa el modelo con datos representativos antes de cualquier uso real.
 - El repositorio no declara una versión mínima de Python; verifica la compatibilidad de las dependencias con la versión que elijas.
 - Este repositorio no incluye pruebas automatizadas, autenticación ni configuración de despliegue.

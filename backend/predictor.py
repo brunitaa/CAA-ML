@@ -20,7 +20,6 @@ def predict(request: PredictRequest):
         top_indices = topk.indices[0].tolist()
         top_labels = label_encoder.inverse_transform(top_indices).tolist()
 
-    # Filtrar según librerías
     personal_lib = personal_libraries.get(request.speaker_id, set())
     final_labels = [p for p in top_labels if p in personal_lib or p in global_library][:5]
 
